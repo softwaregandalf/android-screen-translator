@@ -54,6 +54,10 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.0")
     // Google ML Kit - Çeviri (Translate) Motoru
     implementation("com.google.mlkit:translate:17.0.2")
+    // Google ML Kit - Dil Algılama (Language ID) Motoru
+    implementation("com.google.mlkit:language-id:17.0.5")
+    // Oval ve gölgeli modern arayüz tasarımı için CardView
+    implementation("androidx.cardview:cardview:1.0.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
