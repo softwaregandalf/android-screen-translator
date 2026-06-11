@@ -6,7 +6,13 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.content.res.Resources
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -24,18 +30,24 @@ class FloatingService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
+    private lateinit var btnTranslate: Button
     private var mediaProjection: MediaProjection? = null
+
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-
-        // Android'in bizi öldürmemesi için zorunlu olan Ön Plan (Foreground) bildirimini başlatıyoruz
         createNotificationChannel()
-        startForeground(1, createNotification())
 
-        // Ekrana basma motorunu çağırıyoruz ve arayüzü koda döküyoruz
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(1, createNotification())
+        }
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_widget, null)
 
@@ -53,36 +65,131 @@ class FloatingService : Service() {
 
         windowManager.addView(floatingView, params)
 
-        // Buton tıklama olayını ve animasyonunu ayarlıyoruz
-        val btnTranslate = floatingView.findViewById<Button>(R.id.btn_translate)
+        btnTranslate = floatingView.findViewById(R.id.btn_translate)
         btnTranslate.setOnClickListener {
-            // 1. Yazıyı kısa tutuyoruz ki kutuya sığsın
-            btnTranslate.text = "Aldım!"
-
-            // 2. Material kurallarına uygun şekilde (TintList ile) rengi yeşile çeviriyoruz
-            btnTranslate.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
-
-            // Logcat'e tıklanma kaydı düşüyoruz
-            println("BUTONA BASILDI - EKRAN YAKALAMA BAŞLAYACAK")
-
-            // 3. Butonun kilitli kalmaması için 1.5 saniye sonra eski haline döndürüyoruz
-            Handler(Looper.getMainLooper()).postDelayed({
-                btnTranslate.text = "Çevir"
-                btnTranslate.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#FF3B30"))
-            }, 1500)
+            updateButtonUI("Okuyor...", "#4CAF50")
+            captureScreen()
         }
     }
 
-    // MainActivity'den fırlatılan bileti (Intent) burada yakalıyoruz
+    private fun captureScreen() {
+        if (mediaProjection == null) {
+            updateButtonUI("Ehliyet Yok", "#B00020")
+            println("GELİŞTİRİCİ UYARISI: MediaProjection (Ehliyet) hala null!")
+            resetButtonDelayed()
+            return
+        }
+
+        try {
+            val metrics = Resources.getSystem().displayMetrics
+            val width = metrics.widthPixels
+            val height = metrics.heightPixels
+            val density = metrics.densityDpi
+
+            virtualDisplay?.release()
+            imageReader?.close()
+
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+
+            virtualDisplay = mediaProjection?.createVirtualDisplay(
+                "ScreenCapture",
+                width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface, null, null
+            )
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    val image = imageReader?.acquireLatestImage()
+                    if (image != null) {
+                        val planes = image.planes
+                        val buffer = planes[0].buffer
+                        val pixelStride = planes[0].pixelStride
+                        val rowStride = planes[0].rowStride
+                        val rowPadding = rowStride - pixelStride * width
+
+                        val bitmapWidth = width + rowPadding / pixelStride
+                        val bitmap = Bitmap.createBitmap(bitmapWidth, height, Bitmap.Config.ARGB_8888)
+                        bitmap.copyPixelsFromBuffer(buffer)
+
+                        updateButtonUI("RAM OK!", "#4CAF50")
+                        println("GELİŞTİRİCİ ZAFERİ: Ekran başarıyla RAM'e düştü -> ${bitmap.width}x${bitmap.height}")
+
+                        image.close()
+                    } else {
+                        updateButtonUI("Çevir", "#FF9800")
+                        println("GELİŞTİRİCİ UYARISI: Kamera boş çekti!")
+                    }
+                } catch (e: Exception) {
+                    updateButtonUI("Hata", "#B00020")
+                    println("--- GELİŞTİRİCİ ACİL DURUM: Bitmap İşleme Hatası ---")
+                    e.printStackTrace()
+                } finally {
+                    cleanupResources()
+                    resetButtonDelayed()
+                }
+            }, 1000)
+
+        } catch (e: SecurityException) {
+            updateButtonUI("Hata", "#B00020")
+            println("--- GELİŞTİRİCİ ACİL DURUM: Güvenlik İzni Koptu! ---")
+            e.printStackTrace()
+            cleanupResources()
+            resetButtonDelayed()
+        } catch (e: Exception) {
+            updateButtonUI("Hata", "#B00020")
+            println("--- GELİŞTİRİCİ ACİL DURUM: Sistem Çöktü! ---")
+            e.printStackTrace()
+            cleanupResources()
+            resetButtonDelayed()
+        }
+    }
+
+    private fun updateButtonUI(text: String, colorHex: String) {
+        Handler(Looper.getMainLooper()).post {
+            btnTranslate.text = text
+            btnTranslate.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor(colorHex))
+        }
+    }
+
+    private fun resetButtonDelayed() {
+        Handler(Looper.getMainLooper()).postDelayed({
+            btnTranslate.text = "Çevir"
+            btnTranslate.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#FF3B30"))
+        }, 1500)
+    }
+
+    private fun cleanupResources() {
+        virtualDisplay?.release()
+        virtualDisplay = null
+        imageReader?.close()
+        imageReader = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent != null) {
             val resultCode = intent.getIntExtra("RESULT_CODE", -1)
-            val data: Intent? = intent.getParcelableExtra("DATA")
+
+            val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra("DATA", Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra("DATA")
+            }
 
             if (resultCode == android.app.Activity.RESULT_OK && data != null) {
-                // Bileti MediaProjection'a çevirip ekran okuma yetkisini resmen elimize alıyoruz
                 val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                 mediaProjection = mpm.getMediaProjection(resultCode, data)
+
+                // İŞTE ÇÖZÜM BURADA: Android 14'ün zorunlu kıldığı Callback Zırhı!
+                mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        super.onStop()
+                        cleanupResources()
+                        mediaProjection = null
+                        println("SİSTEM BİLGİSİ: Ekran okuma izni sonlandırıldı.")
+                    }
+                }, Handler(Looper.getMainLooper()))
             }
         }
         return START_NOT_STICKY
@@ -90,13 +197,8 @@ class FloatingService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "SCREEN_TRANSLATOR_CHANNEL",
-                "Ekran Çeviri Servisi",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            val channel = NotificationChannel("SCREEN_TRANSLATOR_CHANNEL", "Ekran Çeviri Servisi", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
@@ -104,13 +206,13 @@ class FloatingService : Service() {
         return NotificationCompat.Builder(this, "SCREEN_TRANSLATOR_CHANNEL")
             .setContentTitle("Ekran Çevirici Aktif")
             .setContentText("Buton arka planda çeviri için hazır bekliyor...")
-            .setSmallIcon(R.mipmap.ic_launcher) // Varsayılan Android ikonunu kullandık
+            .setSmallIcon(R.mipmap.ic_launcher)
             .build()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Servis kapanırken sistemi temiz bırak
+        cleanupResources()
         mediaProjection?.stop()
         if (::floatingView.isInitialized) {
             windowManager.removeView(floatingView)
