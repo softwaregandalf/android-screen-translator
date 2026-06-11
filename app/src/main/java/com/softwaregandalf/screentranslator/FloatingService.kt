@@ -57,7 +57,6 @@ class FloatingService : Service() {
     private var imageReader: ImageReader? = null
     private var resultView: View? = null
 
-    // Yeni Lightshot Mimarisi Değişkenleri
     private var isCaptureRequested = false
     private var cropOverlayView: ScreenCropView? = null
     private var selectedCropRect: Rect? = null
@@ -140,7 +139,6 @@ class FloatingService : Service() {
                     val isClick = clickDuration < 200 && Math.abs(event.rawX - initialTouchX) < 15 && Math.abs(event.rawY - initialTouchY) < 15
 
                     if (isClick) {
-                        // Tıklama Algılandı -> Lighshot Ekranını Başlat!
                         startCropSelection()
                     } else {
                         if (params.y > Resources.getSystem().displayMetrics.heightPixels * 0.75) {
@@ -154,22 +152,19 @@ class FloatingService : Service() {
         }
     }
 
-    // --- İŞTE UX DEHASI: LIGHTSHOT SEÇİM EKRANI ---
     private fun startCropSelection() {
-        floatingView.visibility = View.INVISIBLE // Seçim esnasında ana butonu gizle
+        floatingView.visibility = View.INVISIBLE
 
         cropOverlayView = ScreenCropView(this) { rect ->
             windowManager.removeView(cropOverlayView)
             cropOverlayView = null
-            floatingView.visibility = View.VISIBLE // Butonu geri getir
+            floatingView.visibility = View.VISIBLE
 
             if (rect.width() > 50 && rect.height() > 50) {
-                // Kullanıcı geçerli bir alan seçti, deklanşöre bas!
                 selectedCropRect = rect
                 updateButtonUI("İşleniyor", "#4CAF50")
                 isCaptureRequested = true
             } else {
-                // Seçim yapmadan iptal etti
                 resetButtonDelayed()
             }
         }
@@ -247,7 +242,6 @@ class FloatingService : Service() {
 
                         val fullBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
 
-                        // --- FOTOĞRAFI KOORDİNATLARA GÖRE KESME (CROP) İŞLEMİ ---
                         val safeLeft = Math.max(0, selectedCropRect!!.left)
                         val safeTop = Math.max(0, selectedCropRect!!.top)
                         val safeWidth = Math.min(fullBitmap.width - safeLeft, selectedCropRect!!.width())
@@ -255,7 +249,6 @@ class FloatingService : Service() {
 
                         val croppedBitmap = Bitmap.createBitmap(fullBitmap, safeLeft, safeTop, safeWidth, safeHeight)
 
-                        // Sadece kullanıcının seçtiği saf bölgeyi yapay zekaya fırlat
                         processImageWithAI(croppedBitmap)
                     }
                     image.close()
@@ -267,6 +260,7 @@ class FloatingService : Service() {
         }
     }
 
+    // --- İŞTE ÇEVİRİ KALİTESİNİ KURTARAN BAĞLAM KORUMALI YENİ MOTOR ---
     private fun processImageWithAI(bitmap: Bitmap) {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val inputImage = InputImage.fromBitmap(bitmap, 0)
@@ -274,11 +268,23 @@ class FloatingService : Service() {
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
 
-                // Artık çöp ayıklamaya gerek yok çünkü kullanıcı sadece istediği yeri seçti!
-                val cleanText = visionText.text.replace("\n", " ").trim()
+                val smartTextBuilder = StringBuilder()
+                val blocks = visionText.textBlocks
 
-                if (cleanText.isNotBlank()) {
-                    detectLanguageAndTranslate(cleanText)
+                for (block in blocks) {
+                    // Aynı paragrafın içindeki alt satırları boşlukla birleştirerek tam bir cümle yap
+                    val cleanBlock = block.text.replace("\n", " ").trim()
+
+                    if (cleanBlock.isNotBlank()) {
+                        // Farklı paragraflar/bloklar arasına çift satır atla ki çeviri motoru cümlenin bittiğini anlasın!
+                        smartTextBuilder.append(cleanBlock).append("\n\n")
+                    }
+                }
+
+                val finalSmartText = smartTextBuilder.toString().trim()
+
+                if (finalSmartText.isNotBlank()) {
+                    detectLanguageAndTranslate(finalSmartText)
                 } else {
                     updateButtonUI("Metin Yok", "#FF9800")
                     resetButtonDelayed()
@@ -430,7 +436,6 @@ class FloatingService : Service() {
     }
 }
 
-// --- YENİ EKLENEN KUSTOM GÖRÜNÜM: LIGHTSHOT EKRAN KARARTMA VE ÇİZİM MOTORU ---
 class ScreenCropView(context: Context, private val onCropFinish: (Rect) -> Unit) : View(context) {
     private var startX = 0f
     private var startY = 0f
@@ -455,20 +460,17 @@ class ScreenCropView(context: Context, private val onCropFinish: (Rect) -> Unit)
                 Math.max(startY, endY)
             )
             canvas.save()
-            // Seçilen alanın dışını karartmak için modern kesme yöntemi
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 canvas.clipOutRect(rect)
             } else {
                 @Suppress("DEPRECATION")
                 canvas.clipRect(rect, android.graphics.Region.Op.DIFFERENCE)
             }
-            canvas.drawColor(Color.parseColor("#B3000000")) // %70 Siyah Karartma
+            canvas.drawColor(Color.parseColor("#B3000000"))
             canvas.restore()
 
-            // Seçilen alanın etrafına kesik çizgili çerçeve çiz
             canvas.drawRect(rect, borderPaint)
         } else {
-            // Ekrana ilk dokunulmadığında tamamen karart
             canvas.drawColor(Color.parseColor("#B3000000"))
         }
     }
