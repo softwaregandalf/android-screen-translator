@@ -1,78 +1,76 @@
 package com.softwaregandalf.screentranslator
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Button
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity() { // İŞTE ÇÖZÜM BURADA: Artık temalardan bağımsızız!
 
-    private lateinit var mediaProjectionManager: MediaProjectionManager
-
-    // Ekran yakalama iznini ekrana getirecek olan modern fırlatıcı
-    private val screenCaptureLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            // Kullanıcı ekran yakalamaya onay verdi! Bileti servise yolluyoruz.
+    // Ekran Kaydı İzni İçin Modern Fırlatıcı (Launcher)
+    private val screenCaptureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            // Kullanıcı ekran kaydı iznini verdi, motoru çalıştır!
             startFloatingService(result.resultCode, result.data!!)
         } else {
-            Toast.makeText(this, "Ekran okuma izni verilmedi, uygulama çalışamaz usta.", Toast.LENGTH_SHORT).show()
-            finish()
+            Toast.makeText(this, "Çeviri için ekran okuma izni zorunludur!", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val btnStartSetup = findViewById<Button>(R.id.btn_start_setup)
 
-        // 1. Aşama: Üstte görünme izni kontrolü
+        btnStartSetup.setOnClickListener {
+            checkAndRequestPermissions()
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
+        // 1. Adım: "Diğer Uygulamaların Üzerinde Gösterim" (Overlay) izni kontrolü
         if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Önce diğer uygulamaların üzerinde görünme iznini ver usta!", Toast.LENGTH_LONG).show()
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
             )
-            startActivityForResult(intent, 1001)
-        } else {
-            // İzin zaten varsa doğrudan 2. Aşamaya (Ekran Yakalama iznine) geç
-            askForScreenCapturePermission()
+            startActivity(intent)
+            Toast.makeText(this, "Lütfen listeden uygulamamızı bulup izni açın.", Toast.LENGTH_LONG).show()
+            return
         }
+
+        // 2. Adım: Overlay izni tamamsa, Ekran Kaydı (MediaProjection) iznini iste
+        requestScreenCapturePermission()
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 1001) {
-            if (Settings.canDrawOverlays(this)) {
-                // Üstte görünme izni alındı, şimdi ekran yakalama iznini iste
-                askForScreenCapturePermission()
-            } else {
-                Toast.makeText(this, "Üstte görünme izni şart!", Toast.LENGTH_SHORT).show()
-                finish()
-            }
-        }
+    private fun requestScreenCapturePermission() {
+        val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
     }
 
-    // 2. Aşama: Ekrana o meşhur "Kayıt başlasın mı?" uyarısını çıkaran fonksiyon
-    private fun askForScreenCapturePermission() {
-        val captureIntent = mediaProjectionManager.createScreenCaptureIntent()
-        screenCaptureLauncher.launch(captureIntent)
-    }
-
-    // 3. Aşama: Her iki izin de tamamsa bileti (data) servise ver ve motoru çalıştır
     private fun startFloatingService(resultCode: Int, data: Intent) {
         val serviceIntent = Intent(this, FloatingService::class.java).apply {
             putExtra("RESULT_CODE", resultCode)
             putExtra("DATA", data)
         }
-        startService(serviceIntent)
-        finish() // Ana ekranı kapat, buton sahnede kalsın
+
+        // Android 8 (Oreo) ve üzeri için Foreground Service olarak başlatmak zorunludur
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
+        // Servis başarıyla başladı, bu kurulum ekranını kapatıp kullanıcıyı rahat bırakıyoruz
+        finish()
     }
 }
