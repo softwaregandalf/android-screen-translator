@@ -9,7 +9,13 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Resources
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.DashPathEffect
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.graphics.RectF
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -41,7 +47,7 @@ class FloatingService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
-    private lateinit var dismissView: View // Ekranın altındaki X bölgesi
+    private lateinit var dismissView: View
 
     private lateinit var cardTranslateBtn: androidx.cardview.widget.CardView
     private lateinit var tvBtnText: TextView
@@ -51,9 +57,11 @@ class FloatingService : Service() {
     private var imageReader: ImageReader? = null
     private var resultView: View? = null
 
+    // Yeni Lightshot Mimarisi Değişkenleri
     private var isCaptureRequested = false
+    private var cropOverlayView: ScreenCropView? = null
+    private var selectedCropRect: Rect? = null
 
-    // Sürükle Bırak (Fizik Motoru) Değişkenleri
     private var initialX = 0
     private var initialY = 0
     private var initialTouchX = 0f
@@ -74,7 +82,6 @@ class FloatingService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // 1. Kapatma Bölgesini (Dismiss Target) Gizli Olarak Ekliyoruz
         dismissView = LayoutInflater.from(this).inflate(R.layout.layout_dismiss_target, null)
         val dismissParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -87,7 +94,6 @@ class FloatingService : Service() {
         dismissView.visibility = View.GONE
         windowManager.addView(dismissView, dismissParams)
 
-        // 2. Ana Yüzen Butonu Ekliyoruz
         floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_widget, null)
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -104,28 +110,22 @@ class FloatingService : Service() {
         cardTranslateBtn = floatingView.findViewById(R.id.card_translate_btn)
         tvBtnText = floatingView.findViewById(R.id.tv_btn_text)
 
-        // --- UX DEHASI: SÜRÜKLE BIRAK (DRAG AND DROP) FİZİK MOTORU ---
         cardTranslateBtn.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Ekrana ilk dokunulduğu anki pozisyonları kaydet
                     initialX = params.x
                     initialY = params.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     touchStartTime = System.currentTimeMillis()
-
-                    // Alttaki kapatma bölgesini görünür yap
                     dismissView.visibility = View.VISIBLE
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    // Parmağı hareket ettirdikçe butonu peşinden sürükle
                     params.x = initialX + (event.rawX - initialTouchX).toInt()
                     params.y = initialY + (event.rawY - initialTouchY).toInt()
                     windowManager.updateViewLayout(floatingView, params)
 
-                    // Eğer buton ekranın alt %75'lik kısmına (çöpe yaklaştıysa) kırmızı bölgeyi parlat
                     if (params.y > Resources.getSystem().displayMetrics.heightPixels * 0.75) {
                         dismissView.findViewById<View>(R.id.card_dismiss).alpha = 1.0f
                     } else {
@@ -134,19 +134,15 @@ class FloatingService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    // Parmağı ekrandan çektiğimiz an X bölgesini sakla
                     dismissView.visibility = View.GONE
 
-                    // Bu bir tıklama mı yoksa sürükleme mi? (200 milisaniyeden kısa ve yerinden oynamamışsa TIKLAMADIR)
                     val clickDuration = System.currentTimeMillis() - touchStartTime
                     val isClick = clickDuration < 200 && Math.abs(event.rawX - initialTouchX) < 15 && Math.abs(event.rawY - initialTouchY) < 15
 
                     if (isClick) {
-                        // Tıkladı: Çeviriyi Başlat!
-                        updateButtonUI("Okuyor..", "#4CAF50")
-                        isCaptureRequested = true
+                        // Tıklama Algılandı -> Lighshot Ekranını Başlat!
+                        startCropSelection()
                     } else {
-                        // Sürükledi ve bıraktı: Eğer ekranın alt çöp bölgesine bıraktıysa SİSTEMİ KAPAT!
                         if (params.y > Resources.getSystem().displayMetrics.heightPixels * 0.75) {
                             stopSelf()
                         }
@@ -156,6 +152,36 @@ class FloatingService : Service() {
                 else -> false
             }
         }
+    }
+
+    // --- İŞTE UX DEHASI: LIGHTSHOT SEÇİM EKRANI ---
+    private fun startCropSelection() {
+        floatingView.visibility = View.INVISIBLE // Seçim esnasında ana butonu gizle
+
+        cropOverlayView = ScreenCropView(this) { rect ->
+            windowManager.removeView(cropOverlayView)
+            cropOverlayView = null
+            floatingView.visibility = View.VISIBLE // Butonu geri getir
+
+            if (rect.width() > 50 && rect.height() > 50) {
+                // Kullanıcı geçerli bir alan seçti, deklanşöre bas!
+                selectedCropRect = rect
+                updateButtonUI("İşleniyor", "#4CAF50")
+                isCaptureRequested = true
+            } else {
+                // Seçim yapmadan iptal etti
+                resetButtonDelayed()
+            }
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(cropOverlayView, params)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -206,7 +232,7 @@ class FloatingService : Service() {
             imageReader?.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage()
                 if (image != null) {
-                    if (isCaptureRequested) {
+                    if (isCaptureRequested && selectedCropRect != null) {
                         isCaptureRequested = false
 
                         val planes = image.planes
@@ -219,9 +245,18 @@ class FloatingService : Service() {
                         val bitmap = Bitmap.createBitmap(bitmapWidth, height, Bitmap.Config.ARGB_8888)
                         bitmap.copyPixelsFromBuffer(buffer)
 
-                        val finalBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                        val fullBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
 
-                        processImageWithAI(finalBitmap)
+                        // --- FOTOĞRAFI KOORDİNATLARA GÖRE KESME (CROP) İŞLEMİ ---
+                        val safeLeft = Math.max(0, selectedCropRect!!.left)
+                        val safeTop = Math.max(0, selectedCropRect!!.top)
+                        val safeWidth = Math.min(fullBitmap.width - safeLeft, selectedCropRect!!.width())
+                        val safeHeight = Math.min(fullBitmap.height - safeTop, selectedCropRect!!.height())
+
+                        val croppedBitmap = Bitmap.createBitmap(fullBitmap, safeLeft, safeTop, safeWidth, safeHeight)
+
+                        // Sadece kullanıcının seçtiği saf bölgeyi yapay zekaya fırlat
+                        processImageWithAI(croppedBitmap)
                     }
                     image.close()
                 }
@@ -239,31 +274,11 @@ class FloatingService : Service() {
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
 
-                val smartTextBuilder = StringBuilder()
-                val blocks = visionText.textBlocks
+                // Artık çöp ayıklamaya gerek yok çünkü kullanıcı sadece istediği yeri seçti!
+                val cleanText = visionText.text.replace("\n", " ").trim()
 
-                for (block in blocks) {
-                    val cleanBlock = block.text.replace("\n", " ").trim()
-                    val wordCount = cleanBlock.split("\\s+".toRegex()).size
-
-                    val isSystemUI = cleanBlock.matches(".*\\d{1,2}:\\d{2}.*".toRegex()) ||
-                            cleanBlock.matches(".*%\\d+.*".toRegex()) ||
-                            cleanBlock.contains("5G") || cleanBlock.contains("LTE")
-
-                    val socialGarbageWords = listOf("paylaş", "beğen", "yorum", "kaydet", "share", "like", "comment", "save", "reels", "gönder", "takip", "follow", "müzik", "ses", "orijinal", "abone")
-                    val isSocialButton = socialGarbageWords.any { cleanBlock.lowercase().contains(it) }
-
-                    val isTooShort = wordCount < 3
-
-                    if (!isSystemUI && !isSocialButton && !isTooShort) {
-                        smartTextBuilder.append(cleanBlock).append(" ")
-                    }
-                }
-
-                val finalSmartText = smartTextBuilder.toString().trim()
-
-                if (finalSmartText.isNotBlank()) {
-                    detectLanguageAndTranslate(finalSmartText)
+                if (cleanText.isNotBlank()) {
+                    detectLanguageAndTranslate(cleanText)
                 } else {
                     updateButtonUI("Metin Yok", "#FF9800")
                     resetButtonDelayed()
@@ -363,14 +378,14 @@ class FloatingService : Service() {
     private fun updateButtonUI(text: String, colorHex: String) {
         Handler(Looper.getMainLooper()).post {
             tvBtnText.text = text
-            cardTranslateBtn.setCardBackgroundColor(android.graphics.Color.parseColor(colorHex))
+            cardTranslateBtn.setCardBackgroundColor(Color.parseColor(colorHex))
         }
     }
 
     private fun resetButtonDelayed() {
         Handler(Looper.getMainLooper()).postDelayed({
             tvBtnText.text = "Çevir"
-            cardTranslateBtn.setCardBackgroundColor(android.graphics.Color.parseColor("#1A73E8"))
+            cardTranslateBtn.setCardBackgroundColor(Color.parseColor("#1A73E8"))
         }, 1500)
     }
 
@@ -409,5 +424,81 @@ class FloatingService : Service() {
         if (resultView != null) {
             windowManager.removeView(resultView)
         }
+        if (cropOverlayView != null) {
+            windowManager.removeView(cropOverlayView)
+        }
+    }
+}
+
+// --- YENİ EKLENEN KUSTOM GÖRÜNÜM: LIGHTSHOT EKRAN KARARTMA VE ÇİZİM MOTORU ---
+class ScreenCropView(context: Context, private val onCropFinish: (Rect) -> Unit) : View(context) {
+    private var startX = 0f
+    private var startY = 0f
+    private var endX = 0f
+    private var endY = 0f
+    private var isDrawing = false
+
+    private val borderPaint = Paint().apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        pathEffect = DashPathEffect(floatArrayOf(15f, 15f), 0f)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (isDrawing) {
+            val rect = RectF(
+                Math.min(startX, endX),
+                Math.min(startY, endY),
+                Math.max(startX, endX),
+                Math.max(startY, endY)
+            )
+            canvas.save()
+            // Seçilen alanın dışını karartmak için modern kesme yöntemi
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                canvas.clipOutRect(rect)
+            } else {
+                @Suppress("DEPRECATION")
+                canvas.clipRect(rect, android.graphics.Region.Op.DIFFERENCE)
+            }
+            canvas.drawColor(Color.parseColor("#B3000000")) // %70 Siyah Karartma
+            canvas.restore()
+
+            // Seçilen alanın etrafına kesik çizgili çerçeve çiz
+            canvas.drawRect(rect, borderPaint)
+        } else {
+            // Ekrana ilk dokunulmadığında tamamen karart
+            canvas.drawColor(Color.parseColor("#B3000000"))
+        }
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                startX = event.x
+                startY = event.y
+                endX = event.x
+                endY = event.y
+                isDrawing = true
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                endX = event.x
+                endY = event.y
+                invalidate()
+            }
+            MotionEvent.ACTION_UP -> {
+                isDrawing = false
+                val rect = Rect(
+                    Math.min(startX, endX).toInt(),
+                    Math.min(startY, endY).toInt(),
+                    Math.max(startX, endX).toInt(),
+                    Math.max(startY, endY).toInt()
+                )
+                onCropFinish(rect)
+            }
+        }
+        return true
     }
 }

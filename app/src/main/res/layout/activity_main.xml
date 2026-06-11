@@ -1,7 +1,71 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-             android:orientation="vertical"
-             android:layout_width="match_parent"
-             android:layout_height="match_parent">
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center">
+
+    <ImageView
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:src="@mipmap/ic_launcher"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Ekran Çevirici'ye\nHoş Geldiniz"
+        android:textColor="#FFFFFF"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="32dp" />
+
+    <androidx.cardview.widget.CardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="#202124"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="0dp"
+        android:layout_marginBottom="32dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🔒 Gizlilik ve İzinler"
+                android:textColor="#8AB4F8"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Uygulamamız, ekranda gördüğünüz yabancı metinleri anında Türkçeye çevirebilmek için 'Ekran Kaydı' (MediaProjection) ve 'Diğer Uygulamaların Üzerinde Gösterim' izinlerine ihtiyaç duyar.\n\nÖNEMLİ: Ekranınızdaki görüntüler sadece o an (RAM üzerinde) işlenir. Hiçbir görüntü kaydedilmez, depolanmaz veya uzak sunuculara gönderilmez. %100 güvenlidir."
+                android:textColor="#BDBDBD"
+                android:textSize="14sp"
+                android:lineSpacingExtra="6dp" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <Button
+        android:id="@+id/btn_start_setup"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:backgroundTint="#1A73E8"
+        android:text="İzinleri Ver ve Başlat"
+        android:textAllCaps="false"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold" />
 
 </LinearLayout>
