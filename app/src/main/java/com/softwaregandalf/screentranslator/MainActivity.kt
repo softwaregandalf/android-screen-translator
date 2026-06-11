@@ -1,47 +1,50 @@
 package com.softwaregandalf.screentranslator
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import com.softwaregandalf.screentranslator.ui.theme.AndroidScreenTranslatorTheme
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            AndroidScreenTranslatorTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+
+        // Uygulama açıldığında ilk iş: Üstte gösterme izni var mı diye kontrol et
+        if (!Settings.canDrawOverlays(this)) {
+            // İzin yoksa, kullanıcıyı telefonun ayarlar sayfasına yolla
+            Toast.makeText(this, "Lütfen uygulamanın diğer uygulamaların üzerinde görünmesine izin ver!", Toast.LENGTH_LONG).show()
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivityForResult(intent, 1001)
+        } else {
+            // İzin zaten varsa, direkt motoru çalıştır
+            startFloatingService()
+        }
+    }
+
+    // Ayarlardan (izin ekranından) geri dönünce izni verip vermediğini kontrol eden mekanizma
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 1001) {
+            if (Settings.canDrawOverlays(this)) {
+                startFloatingService()
+            } else {
+                Toast.makeText(this, "İzin vermeden butonu ekrana basamayız", Toast.LENGTH_SHORT).show()
+                finish() // İzin vermezse uygulamayı kapat
             }
         }
     }
-}
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    AndroidScreenTranslatorTheme {
-        Greeting("Android")
+    private fun startFloatingService() {
+        val serviceIntent = Intent(this, FloatingService::class.java)
+        startService(serviceIntent)
+        // Servisi başlattıktan sonra ana uygulamayı kapatıp ekranı temiz bırakıyoruz, buton kendi başına yaşayacak
+        finish()
     }
 }
