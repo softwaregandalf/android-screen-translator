@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
@@ -40,8 +41,8 @@ class FloatingService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
+    private lateinit var dismissView: View // Ekranın altındaki X bölgesi
 
-    // Yeni Şık Butonumuzun Tanımlamaları
     private lateinit var cardTranslateBtn: androidx.cardview.widget.CardView
     private lateinit var tvBtnText: TextView
 
@@ -51,6 +52,13 @@ class FloatingService : Service() {
     private var resultView: View? = null
 
     private var isCaptureRequested = false
+
+    // Sürükle Bırak (Fizik Motoru) Değişkenleri
+    private var initialX = 0
+    private var initialY = 0
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
+    private var touchStartTime = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -65,8 +73,22 @@ class FloatingService : Service() {
         }
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_widget, null)
 
+        // 1. Kapatma Bölgesini (Dismiss Target) Gizli Olarak Ekliyoruz
+        dismissView = LayoutInflater.from(this).inflate(R.layout.layout_dismiss_target, null)
+        val dismissParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        dismissParams.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        dismissView.visibility = View.GONE
+        windowManager.addView(dismissView, dismissParams)
+
+        // 2. Ana Yüzen Butonu Ekliyoruz
+        floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_widget, null)
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -74,20 +96,65 @@ class FloatingService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
-
         params.gravity = Gravity.TOP or Gravity.START
         params.x = 0
         params.y = 100
-
         windowManager.addView(floatingView, params)
 
-        // Yeni tasarımı kod tarafında kancalıyoruz
         cardTranslateBtn = floatingView.findViewById(R.id.card_translate_btn)
         tvBtnText = floatingView.findViewById(R.id.tv_btn_text)
 
-        cardTranslateBtn.setOnClickListener {
-            updateButtonUI("Okuyor..", "#4CAF50") // Yeşil
-            isCaptureRequested = true
+        // --- UX DEHASI: SÜRÜKLE BIRAK (DRAG AND DROP) FİZİK MOTORU ---
+        cardTranslateBtn.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    // Ekrana ilk dokunulduğu anki pozisyonları kaydet
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    touchStartTime = System.currentTimeMillis()
+
+                    // Alttaki kapatma bölgesini görünür yap
+                    dismissView.visibility = View.VISIBLE
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    // Parmağı hareket ettirdikçe butonu peşinden sürükle
+                    params.x = initialX + (event.rawX - initialTouchX).toInt()
+                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    windowManager.updateViewLayout(floatingView, params)
+
+                    // Eğer buton ekranın alt %75'lik kısmına (çöpe yaklaştıysa) kırmızı bölgeyi parlat
+                    if (params.y > Resources.getSystem().displayMetrics.heightPixels * 0.75) {
+                        dismissView.findViewById<View>(R.id.card_dismiss).alpha = 1.0f
+                    } else {
+                        dismissView.findViewById<View>(R.id.card_dismiss).alpha = 0.5f
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    // Parmağı ekrandan çektiğimiz an X bölgesini sakla
+                    dismissView.visibility = View.GONE
+
+                    // Bu bir tıklama mı yoksa sürükleme mi? (200 milisaniyeden kısa ve yerinden oynamamışsa TIKLAMADIR)
+                    val clickDuration = System.currentTimeMillis() - touchStartTime
+                    val isClick = clickDuration < 200 && Math.abs(event.rawX - initialTouchX) < 15 && Math.abs(event.rawY - initialTouchY) < 15
+
+                    if (isClick) {
+                        // Tıkladı: Çeviriyi Başlat!
+                        updateButtonUI("Okuyor..", "#4CAF50")
+                        isCaptureRequested = true
+                    } else {
+                        // Sürükledi ve bıraktı: Eğer ekranın alt çöp bölgesine bıraktıysa SİSTEMİ KAPAT!
+                        if (params.y > Resources.getSystem().displayMetrics.heightPixels * 0.75) {
+                            stopSelf()
+                        }
+                    }
+                    true
+                }
+                else -> false
+            }
         }
     }
 
@@ -165,7 +232,6 @@ class FloatingService : Service() {
         }
     }
 
-    // --- İŞTE GOOGLE MÜHENDİSLİĞİ: AKILLI METİN FİLTRESİ ---
     private fun processImageWithAI(bitmap: Bitmap) {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val inputImage = InputImage.fromBitmap(bitmap, 0)
@@ -180,19 +246,15 @@ class FloatingService : Service() {
                     val cleanBlock = block.text.replace("\n", " ").trim()
                     val wordCount = cleanBlock.split("\\s+".toRegex()).size
 
-                    // 1. Saatler (12:45), Pil Yüzdeleri (%70), Ağ Bilgisi (5G, LTE) Filtresi
                     val isSystemUI = cleanBlock.matches(".*\\d{1,2}:\\d{2}.*".toRegex()) ||
                             cleanBlock.matches(".*%\\d+.*".toRegex()) ||
                             cleanBlock.contains("5G") || cleanBlock.contains("LTE")
 
-                    // 2. Sosyal Medya Çöpleri Kara Listesi (Farklı diller dahil)
                     val socialGarbageWords = listOf("paylaş", "beğen", "yorum", "kaydet", "share", "like", "comment", "save", "reels", "gönder", "takip", "follow", "müzik", "ses", "orijinal", "abone")
                     val isSocialButton = socialGarbageWords.any { cleanBlock.lowercase().contains(it) }
 
-                    // 3. Çok Kısa Parçalar (Buton etiketleri, ikon yazıları genelde 1-2 kelimedir)
                     val isTooShort = wordCount < 3
 
-                    // --- EĞER METİN ÇÖP DEĞİLSE ANA HAVUZA EKLE ---
                     if (!isSystemUI && !isSocialButton && !isTooShort) {
                         smartTextBuilder.append(cleanBlock).append(" ")
                     }
@@ -298,11 +360,9 @@ class FloatingService : Service() {
         }
     }
 
-    // --- YENİ BUTON İÇİN GÜNCELLENMİŞ ARAYÜZ MOTORU ---
     private fun updateButtonUI(text: String, colorHex: String) {
         Handler(Looper.getMainLooper()).post {
             tvBtnText.text = text
-            // CardView'in arkaplan rengini Google standartlarında dinamik değiştiriyoruz
             cardTranslateBtn.setCardBackgroundColor(android.graphics.Color.parseColor(colorHex))
         }
     }
@@ -310,7 +370,6 @@ class FloatingService : Service() {
     private fun resetButtonDelayed() {
         Handler(Looper.getMainLooper()).postDelayed({
             tvBtnText.text = "Çevir"
-            // Bekleme anında klasik Google Mavisi
             cardTranslateBtn.setCardBackgroundColor(android.graphics.Color.parseColor("#1A73E8"))
         }, 1500)
     }
@@ -343,6 +402,9 @@ class FloatingService : Service() {
         mediaProjection?.stop()
         if (::floatingView.isInitialized) {
             windowManager.removeView(floatingView)
+        }
+        if (::dismissView.isInitialized) {
+            windowManager.removeView(dismissView)
         }
         if (resultView != null) {
             windowManager.removeView(resultView)
