@@ -24,7 +24,13 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
+
+// Google ML Kit Kütüphaneleri
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
 class FloatingService : Service() {
 
@@ -67,7 +73,7 @@ class FloatingService : Service() {
 
         btnTranslate = floatingView.findViewById(R.id.btn_translate)
         btnTranslate.setOnClickListener {
-            updateButtonUI("Okuyor...", "#4CAF50")
+            updateButtonUI("Çekiliyor...", "#FF9800") // Turuncu
             captureScreen()
         }
     }
@@ -75,7 +81,6 @@ class FloatingService : Service() {
     private fun captureScreen() {
         if (mediaProjection == null) {
             updateButtonUI("Ehliyet Yok", "#B00020")
-            println("GELİŞTİRİCİ UYARISI: MediaProjection (Ehliyet) hala null!")
             resetButtonDelayed()
             return
         }
@@ -86,6 +91,7 @@ class FloatingService : Service() {
             val height = metrics.heightPixels
             val density = metrics.densityDpi
 
+            // Temizlik
             virtualDisplay?.release()
             imageReader?.close()
 
@@ -98,6 +104,7 @@ class FloatingService : Service() {
                 imageReader?.surface, null, null
             )
 
+            // Deklanşör
             Handler(Looper.getMainLooper()).postDelayed({
                 try {
                     val image = imageReader?.acquireLatestImage()
@@ -112,33 +119,64 @@ class FloatingService : Service() {
                         val bitmap = Bitmap.createBitmap(bitmapWidth, height, Bitmap.Config.ARGB_8888)
                         bitmap.copyPixelsFromBuffer(buffer)
 
-                        updateButtonUI("RAM OK!", "#4CAF50")
-                        println("GELİŞTİRİCİ ZAFERİ: Ekran başarıyla RAM'e düştü -> ${bitmap.width}x${bitmap.height}")
+                        val finalBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
 
+                        // 1. Görüntüyü aldık, kamerayı ve lense ait kaynakları hemen kapatıp RAM'i rahatlatıyoruz
                         image.close()
+                        cleanupResources()
+
+                        // 2. Yapay Zeka (OCR) Tarama Aşaması Başlıyor
+                        updateButtonUI("Okunuyor...", "#2196F3") // Mavi: Zeka devrede
+
+                        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        val inputImage = InputImage.fromBitmap(finalBitmap, 0)
+
+                        recognizer.process(inputImage)
+                            .addOnSuccessListener { visionText ->
+                                val detectedText = visionText.text
+                                println("--- GELİŞTİRİCİ ZAFERİ: YAPAY ZEKA METNİ OKUDU ---")
+                                println(detectedText)
+                                println("--------------------------------------------------")
+
+                                if (detectedText.isNotBlank()) {
+                                    updateButtonUI("Bulundu!", "#4CAF50") // Yeşil
+
+                                    // Ekrana okunan yazının ilk 30 karakterini kanıt olarak basıyoruz
+                                    Handler(Looper.getMainLooper()).post {
+                                        Toast.makeText(applicationContext, "Okunan: ${detectedText.take(30)}...", Toast.LENGTH_LONG).show()
+                                    }
+                                } else {
+                                    updateButtonUI("Metin Yok", "#FF9800") // Ekranda yazı bulamadıysa
+                                }
+                                resetButtonDelayed()
+                            }
+                            .addOnFailureListener { e ->
+                                updateButtonUI("OCR Hata", "#B00020")
+                                println("--- GELİŞTİRİCİ ACİL DURUM: OCR ÇÖKTÜ ---")
+                                e.printStackTrace()
+                                resetButtonDelayed()
+                            }
+
                     } else {
-                        updateButtonUI("Çevir", "#FF9800")
-                        println("GELİŞTİRİCİ UYARISI: Kamera boş çekti!")
+                        updateButtonUI("Boş Kare", "#FF9800")
+                        cleanupResources()
+                        resetButtonDelayed()
                     }
                 } catch (e: Exception) {
-                    updateButtonUI("Hata", "#B00020")
-                    println("--- GELİŞTİRİCİ ACİL DURUM: Bitmap İşleme Hatası ---")
+                    updateButtonUI("İşleme Hata", "#B00020")
                     e.printStackTrace()
-                } finally {
                     cleanupResources()
                     resetButtonDelayed()
                 }
             }, 1000)
 
         } catch (e: SecurityException) {
-            updateButtonUI("Hata", "#B00020")
-            println("--- GELİŞTİRİCİ ACİL DURUM: Güvenlik İzni Koptu! ---")
+            updateButtonUI("İzin Koptu", "#B00020")
             e.printStackTrace()
             cleanupResources()
             resetButtonDelayed()
         } catch (e: Exception) {
-            updateButtonUI("Hata", "#B00020")
-            println("--- GELİŞTİRİCİ ACİL DURUM: Sistem Çöktü! ---")
+            updateButtonUI("Motor Hata", "#B00020")
             e.printStackTrace()
             cleanupResources()
             resetButtonDelayed()
@@ -181,13 +219,11 @@ class FloatingService : Service() {
                 val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                 mediaProjection = mpm.getMediaProjection(resultCode, data)
 
-                // İŞTE ÇÖZÜM BURADA: Android 14'ün zorunlu kıldığı Callback Zırhı!
                 mediaProjection?.registerCallback(object : MediaProjection.Callback() {
                     override fun onStop() {
                         super.onStop()
                         cleanupResources()
                         mediaProjection = null
-                        println("SİSTEM BİLGİSİ: Ekran okuma izni sonlandırıldı.")
                     }
                 }, Handler(Looper.getMainLooper()))
             }
