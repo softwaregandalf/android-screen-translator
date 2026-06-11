@@ -24,13 +24,17 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.Toast
+import android.widget.TextView
 import androidx.core.app.NotificationCompat
 
-// Google ML Kit Kütüphaneleri
+// Google ML Kit (OCR ve Çeviri Kütüphaneleri)
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
 
 class FloatingService : Service() {
 
@@ -41,6 +45,7 @@ class FloatingService : Service() {
 
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    private var resultView: View? = null // Çeviri sonucunu göstereceğimiz pencere
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -73,7 +78,7 @@ class FloatingService : Service() {
 
         btnTranslate = floatingView.findViewById(R.id.btn_translate)
         btnTranslate.setOnClickListener {
-            updateButtonUI("Çekiliyor...", "#FF9800") // Turuncu
+            updateButtonUI("Okunuyor...", "#4CAF50")
             captureScreen()
         }
     }
@@ -91,7 +96,6 @@ class FloatingService : Service() {
             val height = metrics.heightPixels
             val density = metrics.densityDpi
 
-            // Temizlik
             virtualDisplay?.release()
             imageReader?.close()
 
@@ -104,7 +108,6 @@ class FloatingService : Service() {
                 imageReader?.surface, null, null
             )
 
-            // Deklanşör
             Handler(Looper.getMainLooper()).postDelayed({
                 try {
                     val image = imageReader?.acquireLatestImage()
@@ -121,38 +124,27 @@ class FloatingService : Service() {
 
                         val finalBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
 
-                        // 1. Görüntüyü aldık, kamerayı ve lense ait kaynakları hemen kapatıp RAM'i rahatlatıyoruz
                         image.close()
                         cleanupResources()
 
-                        // 2. Yapay Zeka (OCR) Tarama Aşaması Başlıyor
-                        updateButtonUI("Okunuyor...", "#2196F3") // Mavi: Zeka devrede
-
+                        // OCR Taraması
                         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                         val inputImage = InputImage.fromBitmap(finalBitmap, 0)
 
                         recognizer.process(inputImage)
                             .addOnSuccessListener { visionText ->
                                 val detectedText = visionText.text
-                                println("--- GELİŞTİRİCİ ZAFERİ: YAPAY ZEKA METNİ OKUDU ---")
-                                println(detectedText)
-                                println("--------------------------------------------------")
 
                                 if (detectedText.isNotBlank()) {
-                                    updateButtonUI("Bulundu!", "#4CAF50") // Yeşil
-
-                                    // Ekrana okunan yazının ilk 30 karakterini kanıt olarak basıyoruz
-                                    Handler(Looper.getMainLooper()).post {
-                                        Toast.makeText(applicationContext, "Okunan: ${detectedText.take(30)}...", Toast.LENGTH_LONG).show()
-                                    }
+                                    // Yazı bulundu, şimdi çeviri motoruna paslıyoruz!
+                                    translateTextToTurkish(detectedText)
                                 } else {
-                                    updateButtonUI("Metin Yok", "#FF9800") // Ekranda yazı bulamadıysa
+                                    updateButtonUI("Metin Yok", "#FF9800")
+                                    resetButtonDelayed()
                                 }
-                                resetButtonDelayed()
                             }
                             .addOnFailureListener { e ->
                                 updateButtonUI("OCR Hata", "#B00020")
-                                println("--- GELİŞTİRİCİ ACİL DURUM: OCR ÇÖKTÜ ---")
                                 e.printStackTrace()
                                 resetButtonDelayed()
                             }
@@ -170,16 +162,82 @@ class FloatingService : Service() {
                 }
             }, 1000)
 
-        } catch (e: SecurityException) {
-            updateButtonUI("İzin Koptu", "#B00020")
-            e.printStackTrace()
-            cleanupResources()
-            resetButtonDelayed()
         } catch (e: Exception) {
             updateButtonUI("Motor Hata", "#B00020")
             e.printStackTrace()
             cleanupResources()
             resetButtonDelayed()
+        }
+    }
+
+    // --- PROFESYONEL ÇEVİRİ MOTORU ---
+    private fun translateTextToTurkish(englishText: String) {
+        updateButtonUI("Çevriliyor...", "#2196F3") // Mavi durum
+
+        // İngilizceden Türkçeye ayarlar
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.ENGLISH)
+            .setTargetLanguage(TranslateLanguage.TURKISH)
+            .build()
+        val englishTurkishTranslator = Translation.getClient(options)
+
+        // Model yoksa internetten ufak bir paket indirip çeviriye devam etme kuralları
+        val conditions = DownloadConditions.Builder().build()
+
+        englishTurkishTranslator.downloadModelIfNeeded(conditions)
+            .addOnSuccessListener {
+                // Model hazır, çeviriyi patlatıyoruz
+                englishTurkishTranslator.translate(englishText)
+                    .addOnSuccessListener { translatedText ->
+                        updateButtonUI("Çevrildi!", "#4CAF50") // Yeşil Zafer
+                        showTranslationResult(translatedText)
+                        resetButtonDelayed()
+                    }
+                    .addOnFailureListener { e ->
+                        updateButtonUI("Çeviri Hatası", "#B00020")
+                        e.printStackTrace()
+                        resetButtonDelayed()
+                    }
+            }
+            .addOnFailureListener { e ->
+                updateButtonUI("Model İndirilemedi", "#B00020")
+                e.printStackTrace()
+                resetButtonDelayed()
+            }
+    }
+
+    // --- EKRANDA SONUCU GÖSTEREN PENCERE MOTORU ---
+    private fun showTranslationResult(text: String) {
+        Handler(Looper.getMainLooper()).post {
+            // Varsa eski pencereyi temizle
+            if (resultView != null) {
+                windowManager.removeView(resultView)
+                resultView = null
+            }
+
+            // Yeni pencereyi oluştur
+            resultView = LayoutInflater.from(this).inflate(R.layout.layout_translation_result, null)
+
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            )
+            params.gravity = Gravity.CENTER // Ekranın tam ortasında dursun
+
+            val tvTranslatedText = resultView!!.findViewById<TextView>(R.id.tv_translated_text)
+            val btnClose = resultView!!.findViewById<Button>(R.id.btn_close_result)
+
+            tvTranslatedText.text = text
+
+            btnClose.setOnClickListener {
+                windowManager.removeView(resultView)
+                resultView = null
+            }
+
+            windowManager.addView(resultView, params)
         }
     }
 
@@ -252,6 +310,9 @@ class FloatingService : Service() {
         mediaProjection?.stop()
         if (::floatingView.isInitialized) {
             windowManager.removeView(floatingView)
+        }
+        if (resultView != null) {
+            windowManager.removeView(resultView)
         }
     }
 }

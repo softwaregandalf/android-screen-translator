@@ -50,6 +50,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // Google ML Kit - Metin Tanıma (OCR) Motoru
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+    // Google ML Kit - Çeviri (Translate) Motoru
+    implementation("com.google.mlkit:translate:17.0.2")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
