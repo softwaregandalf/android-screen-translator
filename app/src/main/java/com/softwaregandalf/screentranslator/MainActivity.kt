@@ -1,50 +1,78 @@
 package com.softwaregandalf.screentranslator
 
+import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var mediaProjectionManager: MediaProjectionManager
+
+    // Ekran yakalama iznini ekrana getirecek olan modern fırlatıcı
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            // Kullanıcı ekran yakalamaya onay verdi! Bileti servise yolluyoruz.
+            startFloatingService(result.resultCode, result.data!!)
+        } else {
+            Toast.makeText(this, "Ekran okuma izni verilmedi, uygulama çalışamaz usta.", Toast.LENGTH_SHORT).show()
+            finish()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Uygulama açıldığında ilk iş: Üstte gösterme izni var mı diye kontrol et
+        mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+
+        // 1. Aşama: Üstte görünme izni kontrolü
         if (!Settings.canDrawOverlays(this)) {
-            // İzin yoksa, kullanıcıyı telefonun ayarlar sayfasına yolla
-            Toast.makeText(this, "Lütfen uygulamanın diğer uygulamaların üzerinde görünmesine izin ver!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Önce diğer uygulamaların üzerinde görünme iznini ver usta!", Toast.LENGTH_LONG).show()
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
             )
             startActivityForResult(intent, 1001)
         } else {
-            // İzin zaten varsa, direkt motoru çalıştır
-            startFloatingService()
+            // İzin zaten varsa doğrudan 2. Aşamaya (Ekran Yakalama iznine) geç
+            askForScreenCapturePermission()
         }
     }
 
-    // Ayarlardan (izin ekranından) geri dönünce izni verip vermediğini kontrol eden mekanizma
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 1001) {
             if (Settings.canDrawOverlays(this)) {
-                startFloatingService()
+                // Üstte görünme izni alındı, şimdi ekran yakalama iznini iste
+                askForScreenCapturePermission()
             } else {
-                Toast.makeText(this, "İzin vermeden butonu ekrana basamayız", Toast.LENGTH_SHORT).show()
-                finish() // İzin vermezse uygulamayı kapat
+                Toast.makeText(this, "Üstte görünme izni şart!", Toast.LENGTH_SHORT).show()
+                finish()
             }
         }
     }
 
-    private fun startFloatingService() {
-        val serviceIntent = Intent(this, FloatingService::class.java)
+    // 2. Aşama: Ekrana o meşhur "Kayıt başlasın mı?" uyarısını çıkaran fonksiyon
+    private fun askForScreenCapturePermission() {
+        val captureIntent = mediaProjectionManager.createScreenCaptureIntent()
+        screenCaptureLauncher.launch(captureIntent)
+    }
+
+    // 3. Aşama: Her iki izin de tamamsa bileti (data) servise ver ve motoru çalıştır
+    private fun startFloatingService(resultCode: Int, data: Intent) {
+        val serviceIntent = Intent(this, FloatingService::class.java).apply {
+            putExtra("RESULT_CODE", resultCode)
+            putExtra("DATA", data)
+        }
         startService(serviceIntent)
-        // Servisi başlattıktan sonra ana uygulamayı kapatıp ekranı temiz bırakıyoruz, buton kendi başına yaşayacak
-        finish()
+        finish() // Ana ekranı kapat, buton sahnede kalsın
     }
 }
