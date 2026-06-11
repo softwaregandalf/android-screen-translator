@@ -10,13 +10,14 @@ import android.graphics.PixelFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.Toast
 import androidx.core.app.NotificationCompat
 
 class FloatingService : Service() {
@@ -34,6 +35,7 @@ class FloatingService : Service() {
         createNotificationChannel()
         startForeground(1, createNotification())
 
+        // Ekrana basma motorunu çağırıyoruz ve arayüzü koda döküyoruz
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_widget, null)
 
@@ -51,11 +53,23 @@ class FloatingService : Service() {
 
         windowManager.addView(floatingView, params)
 
-        // Butona tıklandığında ne olacağını belirliyoruz
+        // Buton tıklama olayını ve animasyonunu ayarlıyoruz
         val btnTranslate = floatingView.findViewById<Button>(R.id.btn_translate)
         btnTranslate.setOnClickListener {
-            // Şimdilik sadece tepki veriyoruz, bir sonraki adımda buraya ekranın fotoğrafını çekme kodunu yazacağız
-            Toast.makeText(this, "Ekran Yakalama başarılı.", Toast.LENGTH_SHORT).show()
+            // 1. Yazıyı kısa tutuyoruz ki kutuya sığsın
+            btnTranslate.text = "Aldım!"
+
+            // 2. Material kurallarına uygun şekilde (TintList ile) rengi yeşile çeviriyoruz
+            btnTranslate.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
+
+            // Logcat'e tıklanma kaydı düşüyoruz
+            println("BUTONA BASILDI - EKRAN YAKALAMA BAŞLAYACAK")
+
+            // 3. Butonun kilitli kalmaması için 1.5 saniye sonra eski haline döndürüyoruz
+            Handler(Looper.getMainLooper()).postDelayed({
+                btnTranslate.text = "Çevir"
+                btnTranslate.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#FF3B30"))
+            }, 1500)
         }
     }
 
