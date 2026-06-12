@@ -39,7 +39,6 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.languageid.LanguageIdentification
-import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
 
@@ -66,6 +65,12 @@ class FloatingService : Service() {
     private var initialTouchX = 0f
     private var initialTouchY = 0f
     private var touchStartTime = 0L
+
+    // HAFIZADAN HEDEF DİLİ ÇEKME FONKSİYONU
+    private fun getTargetLanguageCode(): String {
+        val prefs = getSharedPreferences("ST_PREFS", Context.MODE_PRIVATE)
+        return prefs.getString("TARGET_LANG_CODE", "tr") ?: "tr"
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -260,7 +265,6 @@ class FloatingService : Service() {
         }
     }
 
-    // --- İŞTE ÇEVİRİ KALİTESİNİ KURTARAN BAĞLAM KORUMALI YENİ MOTOR ---
     private fun processImageWithAI(bitmap: Bitmap) {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val inputImage = InputImage.fromBitmap(bitmap, 0)
@@ -272,11 +276,8 @@ class FloatingService : Service() {
                 val blocks = visionText.textBlocks
 
                 for (block in blocks) {
-                    // Aynı paragrafın içindeki alt satırları boşlukla birleştirerek tam bir cümle yap
                     val cleanBlock = block.text.replace("\n", " ").trim()
-
                     if (cleanBlock.isNotBlank()) {
-                        // Farklı paragraflar/bloklar arasına çift satır atla ki çeviri motoru cümlenin bittiğini anlasın!
                         smartTextBuilder.append(cleanBlock).append("\n\n")
                     }
                 }
@@ -300,15 +301,17 @@ class FloatingService : Service() {
         val languageIdentifier = LanguageIdentification.getClient()
         languageIdentifier.identifyLanguage(text)
             .addOnSuccessListener { languageCode ->
+                val targetLang = getTargetLanguageCode() // Hedef dili aldık
+
                 if (languageCode == "und") {
                     updateButtonUI("Dil Bulunamadı", "#FF9800")
                     resetButtonDelayed()
-                } else if (languageCode == "tr") {
-                    updateButtonUI("Zaten TR", "#4CAF50")
-                    showTranslationResult(text, "tr")
+                } else if (languageCode == targetLang) {
+                    updateButtonUI("Zaten $targetLang", "#4CAF50")
+                    showTranslationResult(text, languageCode, targetLang)
                     resetButtonDelayed()
                 } else {
-                    translateDynamic(text, languageCode)
+                    translateDynamic(text, languageCode, targetLang)
                 }
             }
             .addOnFailureListener {
@@ -317,12 +320,13 @@ class FloatingService : Service() {
             }
     }
 
-    private fun translateDynamic(text: String, sourceLangCode: String) {
+    // --- DİNAMİK ÇEVİRİ MOTORU GÜNCELLEMESİ ---
+    private fun translateDynamic(text: String, sourceLangCode: String, targetLangCode: String) {
         updateButtonUI("Çevriliyor..", "#8AB4F8")
 
         val options = TranslatorOptions.Builder()
             .setSourceLanguage(sourceLangCode)
-            .setTargetLanguage(TranslateLanguage.TURKISH)
+            .setTargetLanguage(targetLangCode) // Artık dinamik!
             .build()
         val translator = Translation.getClient(options)
 
@@ -333,7 +337,7 @@ class FloatingService : Service() {
                 translator.translate(text)
                     .addOnSuccessListener { translatedText ->
                         updateButtonUI("Başarılı!", "#4CAF50")
-                        showTranslationResult(translatedText, sourceLangCode)
+                        showTranslationResult(translatedText, sourceLangCode, targetLangCode)
                         resetButtonDelayed()
                     }
                     .addOnFailureListener {
@@ -347,7 +351,8 @@ class FloatingService : Service() {
             }
     }
 
-    private fun showTranslationResult(text: String, sourceLang: String) {
+    // Sonuç ekranına HEDEF DİLİ de ekledik
+    private fun showTranslationResult(text: String, sourceLang: String, targetLang: String) {
         Handler(Looper.getMainLooper()).post {
             if (resultView != null) {
                 windowManager.removeView(resultView)
@@ -369,7 +374,8 @@ class FloatingService : Service() {
             val tvTranslatedText = resultView!!.findViewById<TextView>(R.id.tv_translated_text)
             val btnClose = resultView!!.findViewById<Button>(R.id.btn_close_result)
 
-            tvLanguageInfo.text = "ÇEVİRİ [${sourceLang.uppercase()} -> TR]"
+            // Ekranın tepesine havalı bir şekilde [TR -> EN] formatında yazıyoruz
+            tvLanguageInfo.text = "ÇEVİRİ [${sourceLang.uppercase()} -> ${targetLang.uppercase()}]"
             tvTranslatedText.text = text
 
             btnClose.setOnClickListener {

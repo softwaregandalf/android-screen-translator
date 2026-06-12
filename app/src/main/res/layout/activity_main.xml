@@ -30,7 +30,7 @@
         app:cardBackgroundColor="#202124"
         app:cardCornerRadius="16dp"
         app:cardElevation="0dp"
-        android:layout_marginBottom="32dp">
+        android:layout_marginBottom="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -45,15 +45,47 @@
                 android:textColor="#8AB4F8"
                 android:textSize="16sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="12dp" />
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Uygulamamız, ekranda gördüğünüz yabancı metinleri anında Türkçeye çevirebilmek için 'Ekran Kaydı' (MediaProjection) ve 'Diğer Uygulamaların Üzerinde Gösterim' izinlerine ihtiyaç duyar.\n\nÖNEMLİ: Ekranınızdaki görüntüler sadece o an (RAM üzerinde) işlenir. Hiçbir görüntü kaydedilmez, depolanmaz veya uzak sunuculara gönderilmez. %100 güvenlidir."
+                android:text="Görüntüler sadece cihaz RAM'inde işlenir ve asla buluta gönderilmez. %100 çevrimdışı ve güvenlidir."
                 android:textColor="#BDBDBD"
-                android:textSize="14sp"
-                android:lineSpacingExtra="6dp" />
+                android:textSize="13sp"
+                android:lineSpacingExtra="4dp" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <androidx.cardview.widget.CardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="#202124"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="0dp"
+        android:layout_marginBottom="32dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🌍 Hedef Çeviri Dili"
+                android:textColor="#8AB4F8"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <Spinner
+                android:id="@+id/spinner_target_language"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:backgroundTint="#8AB4F8"
+                android:popupBackground="#303134" />
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 
@@ -62,7 +94,7 @@
         android:layout_width="match_parent"
         android:layout_height="60dp"
         android:backgroundTint="#1A73E8"
-        android:text="İzinleri Ver ve Başlat"
+        android:text="Başlat"
         android:textAllCaps="false"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
