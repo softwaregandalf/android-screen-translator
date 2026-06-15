@@ -7,17 +7,35 @@
 
     <androidx.cardview.widget.CardView
         android:id="@+id/card_translate_btn"
-        android:layout_width="70dp"
-        android:layout_height="70dp"
+        android:layout_width="wrap_content"
+        android:layout_height="50dp"
         app:cardBackgroundColor="#1A73E8"
-        app:cardCornerRadius="35dp"
-        app:cardElevation="12dp">
+        app:cardCornerRadius="25dp"
+        app:cardElevation="8dp">
 
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="match_parent"
-            android:gravity="center"
-            android:orientation="vertical">
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="20dp">
+
+            <ImageView
+                android:id="@+id/btn_floating_settings"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@android:drawable/ic_menu_manage"
+                app:tint="#FFFFFF"
+                android:layout_marginEnd="12dp"
+                android:clickable="true"
+                android:focusable="true"/>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="24dp"
+                android:background="#4DFFFFFF"
+                android:layout_marginEnd="12dp"/>
 
             <TextView
                 android:id="@+id/tv_btn_text"
@@ -25,10 +43,8 @@
                 android:layout_height="wrap_content"
                 android:text="Çevir"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
+                android:textSize="16sp"
                 android:textStyle="bold" />
-
         </LinearLayout>
     </androidx.cardview.widget.CardView>
-
 </FrameLayout>

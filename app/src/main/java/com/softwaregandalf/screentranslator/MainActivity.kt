@@ -8,22 +8,26 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.Spinner
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private lateinit var spinnerTargetLang: Spinner
+    private lateinit var btnStartSetup: Button
 
     // Global Kullanıcı Kitlesi İçin Temel Dil Havuzu
     private val languageNames = arrayOf("Türkçe", "English (İngilizce)", "Español (İspanyolca)", "Deutsch (Almanca)", "Français (Fransızca)", "日本語 (Japonca)", "Русский (Rusça)", "العربية (Arapça)")
     // Google ML Kit'in anlayacağı BCP-47 dil kodları (Sıralama üsttekiyle aynı olmak ZORUNDA)
     private val languageCodes = arrayOf("tr", "en", "es", "de", "fr", "ja", "ru", "ar")
 
+    // MODERN İZİN İSTEME YÖNTEMİ (Senin yazdığın o temiz yapı)
     private val screenCaptureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             startFloatingService(result.resultCode, result.data!!)
@@ -37,9 +41,41 @@ class MainActivity : ComponentActivity() {
         setContentView(R.layout.activity_main)
 
         spinnerTargetLang = findViewById(R.id.spinner_target_language)
-        val btnStartSetup = findViewById<Button>(R.id.btn_start_setup)
+        btnStartSetup = findViewById(R.id.btn_start_setup)
 
-        // Spinner (Açılır menü) Kurulumu
+        setupSpinner()
+
+        btnStartSetup.setOnClickListener {
+            saveSelectedLanguage()
+
+            // EĞER ÇEVİRİ MOTORU ZATEN ÇALIŞIYORSA (Ayarlardan geldiysek) YENİDEN İZİN İSTEME!
+            if (FloatingService.isRunning) {
+                Toast.makeText(this, "Dil güncellendi!", Toast.LENGTH_SHORT).show()
+                moveTaskToBack(true) // Ekranı kapat, yüzen butona geri dön
+            } else {
+                checkAndRequestPermissions()
+            }
+        }
+
+        // Eğer FloatingService'den "Ayarlar" tuşuna basılıp gelindiyse intent'i yakala
+        handleIntent(intent)
+    }
+
+    // Yüzen Butondan (Ayarlar) geldiğimizde Activity baştan yaratılmaz, bu fonksiyon tetiklenir (Single Top Koruması)
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        intent?.let { handleIntent(it) }
+    }
+
+    private fun handleIntent(intent: Intent) {
+        val fromFloatingService = intent.getBooleanExtra("FROM_FLOATING_SERVICE", false)
+        if (fromFloatingService) {
+            // Yüzen butondan gelindi! Butonun yazısını değiştirelim ki kullanıcı ne yapacağını bilsin.
+            btnStartSetup.text = "Ayarları Kaydet ve Kapat"
+        }
+    }
+
+    private fun setupSpinner() {
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languageNames)
         spinnerTargetLang.adapter = adapter
 
@@ -48,13 +84,15 @@ class MainActivity : ComponentActivity() {
         val savedIndex = prefs.getInt("TARGET_LANG_INDEX", 0)
         spinnerTargetLang.setSelection(savedIndex)
 
-        btnStartSetup.setOnClickListener {
-            saveSelectedLanguage()
-            checkAndRequestPermissions()
+        // DİKKAT: Dil her değiştiğinde anında hafızaya yaz (FloatingService anında o dili okumaya başlar)
+        spinnerTargetLang.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                saveSelectedLanguage()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 
-    // --- İŞTE GLOBALLEŞME MÜHRÜ: SEÇİLEN DİLİ HAFIZAYA YAZ ---
     private fun saveSelectedLanguage() {
         val selectedIndex = spinnerTargetLang.selectedItemPosition
         val selectedCode = languageCodes[selectedIndex]
@@ -62,7 +100,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("ST_PREFS", Context.MODE_PRIVATE)
         prefs.edit()
             .putInt("TARGET_LANG_INDEX", selectedIndex)
-            .putString("TARGET_LANG_CODE", selectedCode) // FloatingService bu kodu okuyacak!
+            .putString("TARGET_LANG_CODE", selectedCode)
             .apply()
     }
 
@@ -97,6 +135,7 @@ class MainActivity : ComponentActivity() {
             startService(serviceIntent)
         }
 
-        finish()
+        // Uygulamayı kill etme (finish yapma), sadece arka plana at. Bu sayede Single Top yaşar.
+        moveTaskToBack(true)
     }
 }
